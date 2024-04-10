@@ -64,6 +64,36 @@ int divtest() {
     return 0;
 }
 
+int divtest64() {
+    int32 i3, fi3, i2, fi2, i10, ifrac, fifrac;
+    float64 f3, f2, f10, ffrac, ffinal;
+
+    i3 = 3;
+    printf("i3: %ld\n", i3);
+    i2 = 2;
+    printf("i2: %ld\n", i2);
+
+    int32_to_float64(&f3, i3);
+    fi3 = float64_to_int32(&f3);
+    printf("fi3: %ld\n", fi3);
+
+    int32_to_float64(&f2, i2);
+    fi2 = float64_to_int32(&f2);
+    printf("fi2: %ld\n", fi2);
+
+    float64_div(&ffrac, &f3, &f2);
+    fifrac = float64_to_int32(&ffrac);
+    printf("fifrac: %ld\n", fifrac);
+
+    i10 = 10;
+    int32_to_float64(&f10, i10);
+    float64_mul(&ffinal, &ffrac, &f10);
+    ifrac = float64_to_int32(&ffinal);
+    printf("%ld\n", ifrac);
+
+    return 0;
+}
+
 int main() {
-    return divtest();
+    return divtest64();
 }
