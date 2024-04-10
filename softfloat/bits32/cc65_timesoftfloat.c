@@ -31,6 +31,8 @@ code that are retained.
 #include "milieu.h"
 #include "softfloat.h"
 
+#define CLOCKS_PER_SEC 1022727
+
 enum {
     minIterations = 1000
 };

@@ -25,6 +25,7 @@ code that are retained.
 
 #include "milieu.h"
 #include "softfloat.h"
+/* #include <stdio.h> debug */
 
 /*----------------------------------------------------------------------------
 | Floating-point rounding mode and exception flags.
@@ -114,6 +115,7 @@ static void
 INLINE float32 packFloat32( flag zSign, int16 zExp, bits32 zSig )
 {
 
+    /* printf("packFloat32 zSign %d; zExp %d; zSig %lu %lx\n", zSign, zExp, zSig, zSig); debug */
     return ( ( (bits32) zSign )<<31 ) + ( ( (bits32) zExp )<<23 ) + zSig;
 
 }
@@ -147,10 +149,13 @@ static float32 roundAndPackFloat32( flag zSign, int16 zExp, bits32 zSig )
     int8 roundIncrement, roundBits;
     flag isTiny;
 
+    /* printf("roundAndPackFloat32: zSign %d; zExp %d; zSig %lu\n", zSign, zExp, zSig); debug */
+
     roundingMode = float_rounding_mode;
     roundNearestEven = roundingMode == float_round_nearest_even;
     roundIncrement = 0x40;
     if ( ! roundNearestEven ) {
+        /* printf("! roundNearestEven\n"); debug */
         if ( roundingMode == float_round_to_zero ) {
             roundIncrement = 0;
         }
@@ -166,14 +171,17 @@ static float32 roundAndPackFloat32( flag zSign, int16 zExp, bits32 zSig )
     }
     roundBits = zSig & 0x7F;
     if ( 0xFD <= (bits16) zExp ) {
+        /* printf(" 0xFD <= (bits16) zExp %u %x\n", (bits16) zExp, (bits16) zExp); debug */
         if (    ( 0xFD < zExp )
              || (    ( zExp == 0xFD )
                   && ( (sbits32) ( zSig + roundIncrement ) < 0 ) )
            ) {
             float_raise( float_flag_overflow | float_flag_inexact );
+            /* printf("early return\n"); debug */
             return packFloat32( zSign, 0xFF, 0 ) - ( roundIncrement == 0 );
         }
         if ( zExp < 0 ) {
+            /* printf("zExp %d %x < 0\n", zExp, zExp); debug */
             isTiny =
                    ( float_detect_tininess == float_tininess_before_rounding )
                 || ( zExp < -1 )
@@ -185,9 +193,14 @@ static float32 roundAndPackFloat32( flag zSign, int16 zExp, bits32 zSig )
         }
     }
     if ( roundBits ) float_exception_flags |= float_flag_inexact;
+    /* printf("zSig before: %lu %lx\n", zSig, zSig); debug */
     zSig = ( zSig + roundIncrement )>>7;
-    zSig &= ~ ( ( ( roundBits ^ 0x40 ) == 0 ) & roundNearestEven );
+    /* printf("zSig mid: %lu %lx\n", zSig, zSig); debug */
+    zSig &= ~ ( ( ( ((bits32) roundBits) ^ 0x40ul ) == 0ul ) & ((bits32) roundNearestEven) );
+    /* zSig &= ~ ( ( ( roundBits ^ 0x40 ) == 0 ) & roundNearestEven ); */ /* debug removed */
+    /* printf("zSig after: %lu %lx\n", zSig, zSig); debug */
     if ( zSig == 0 ) zExp = 0;
+    /* printf("late return\n"); debug */
     return packFloat32( zSign, zExp, zSig );
 
 }
@@ -207,6 +220,8 @@ static float32
     int8 shiftCount;
 
     shiftCount = countLeadingZeros32( zSig ) - 1;
+    /* printf("zSign %d; zExp %d; zSig %lu %lx; shiftCount %d\n", zSign, zExp, zSig, zSig, shiftCount); debug */
+    /* printf("zSig << shiftCount %lu %lx\n", zSig << shiftCount, zSig << shiftCount); debug */
     return roundAndPackFloat32( zSign, zExp - shiftCount, zSig<<shiftCount );
 
 }
@@ -311,11 +326,11 @@ static void
 *----------------------------------------------------------------------------*/
 
 INLINE void
- packFloat64( float64 *dst, flag zSign, int16 zExp, bits32 zSig0, bits32 zSig1 )
+packFloat64( float64 *dst, flag zSign, int16 zExp, bits32 zSig0, bits32 zSig1 )
 {
+
     dst->low = zSig1;
     dst->high = ( ( (bits32) zSign )<<31 ) + ( ( (bits32) zExp )<<20 ) + zSig0;
-    return dst;
 
 }
 
@@ -375,9 +390,11 @@ static void
                  || ( zSign && ( roundingMode == float_round_up ) )
                  || ( ! zSign && ( roundingMode == float_round_down ) )
                ) {
-                return packFloat64( zSign, 0x7FE, 0x000FFFFF, 0xFFFFFFFF );
+                packFloat64( dst, zSign, 0x7FE, 0x000FFFFF, 0xFFFFFFFF );
+                return;
             }
-            return packFloat64( zSign, 0x7FF, 0, 0 );
+            packFloat64( dst, zSign, 0x7FF, 0, 0 );
+            return;
         }
         if ( zExp < 0 ) {
             isTiny =
@@ -410,7 +427,8 @@ static void
     else {
         if ( ( zSig0 | zSig1 ) == 0 ) zExp = 0;
     }
-    return packFloat64( zSign, zExp, zSig0, zSig1 );
+    packFloat64( dst, zSign, zExp, zSig0, zSig1 );
+    return;
 
 }
 
@@ -424,9 +442,9 @@ static void
 | point exponent.
 *----------------------------------------------------------------------------*/
 
-static float64
+static void
  normalizeRoundAndPackFloat64(
-     flag zSign, int16 zExp, bits32 zSig0, bits32 zSig1 )
+     float64 *dst, flag zSign, int16 zExp, bits32 zSig0, bits32 zSig1 )
 {
     int8 shiftCount;
     bits32 zSig2;
@@ -446,7 +464,7 @@ static float64
             zSig0, zSig1, 0, - shiftCount, &zSig0, &zSig1, &zSig2 );
     }
     zExp -= shiftCount;
-    return roundAndPackFloat64( zSign, zExp, zSig0, zSig1, zSig2 );
+    roundAndPackFloat64( dst, zSign, zExp, zSig0, zSig1, zSig2 );
 
 }
 
@@ -459,10 +477,16 @@ static float64
 float32 int32_to_float32( int32 a )
 {
     flag zSign;
+    /* float32 out; debug */
 
     if ( a == 0 ) return 0;
+    /* printf("a %ld != 0\n", a); debug */
     if ( a == (sbits32) 0x80000000 ) return packFloat32( 1, 0x9E, 0 );
+    /* printf("a %ld != 0x80000000\n", a); debug */
     zSign = ( a < 0 );
+    /* printf("zSign %d\n", zSign); debug */
+    /* out = normalizeRoundAndPackFloat32( zSign, 0x9C, zSign ? - a : a ); debug */
+    /* printf("out %d\n", out); debug */
     return normalizeRoundAndPackFloat32( zSign, 0x9C, zSign ? - a : a );
 
 }
@@ -473,14 +497,17 @@ float32 int32_to_float32( int32 a )
 | according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 int32_to_float64( int32 a )
+void int32_to_float64( float64 *dst, int32 a )
 {
     flag zSign;
     bits32 absA;
     int8 shiftCount;
     bits32 zSig0, zSig1;
 
-    if ( a == 0 ) return packFloat64( 0, 0, 0, 0 );
+    if ( a == 0 ) {
+        packFloat64( dst, 0, 0, 0, 0 );
+        return;
+    }
     zSign = ( a < 0 );
     absA = zSign ? - a : a;
     shiftCount = countLeadingZeros32( absA ) - 11;
@@ -491,7 +518,7 @@ float64 int32_to_float64( int32 a )
     else {
         shift64Right( absA, 0, - shiftCount, &zSig0, &zSig1 );
     }
-    return packFloat64( zSign, 0x412 - shiftCount, zSig0, zSig1 );
+    packFloat64( dst, zSign, 0x412 - shiftCount, zSig0, zSig1 );
 
 }
 
@@ -611,8 +638,9 @@ int32 float32_to_int32_round_to_zero( float32 a )
 | performed according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float32_to_float64( float32 a )
+void float32_to_float64( float64 *dst, float32 a )
 {
+    commonNaNT cnan;
     flag aSign;
     int16 aExp;
     bits32 aSig, zSig0, zSig1;
@@ -621,16 +649,24 @@ float64 float32_to_float64( float32 a )
     aExp = extractFloat32Exp( a );
     aSign = extractFloat32Sign( a );
     if ( aExp == 0xFF ) {
-        if ( aSig ) return commonNaNToFloat64( float32ToCommonNaN( a ) );
-        return packFloat64( aSign, 0x7FF, 0, 0 );
+        if ( aSig ) {
+            float32ToCommonNaN( &cnan, a );
+            commonNaNToFloat64( dst, &cnan );
+            return;
+        }
+        packFloat64( dst, aSign, 0x7FF, 0, 0 );
+        return;
     }
     if ( aExp == 0 ) {
-        if ( aSig == 0 ) return packFloat64( aSign, 0, 0, 0 );
+        if ( aSig == 0 ) {
+            packFloat64( dst, aSign, 0, 0, 0 );
+            return;
+        }
         normalizeFloat32Subnormal( aSig, &aExp, &aSig );
         --aExp;
     }
     shift64Right( aSig, 0, 3, &zSig0, &zSig1 );
-    return packFloat64( aSign, aExp + 0x380, zSig0, zSig1 );
+    packFloat64( dst, aSign, aExp + 0x380, zSig0, zSig1 );
 
 }
 
@@ -1017,7 +1053,7 @@ float32 float32_rem( float32 a, float32 b )
 {
     flag aSign, bSign, zSign;
     int16 aExp, bExp, expDiff;
-    bits32 aSig, bSig, q, allZero, alternateASig;
+    bits32 aSig, bSig, q, alternateASig;
     sbits32 sigMean;
 
     aSig = extractFloat32Frac( a );
@@ -1245,7 +1281,6 @@ flag float32_eq_signaling( float32 a, float32 b )
 flag float32_le_quiet( float32 a, float32 b )
 {
     flag aSign, bSign;
-    int16 aExp, bExp;
 
     if (    ( ( extractFloat32Exp( a ) == 0xFF ) && extractFloat32Frac( a ) )
          || ( ( extractFloat32Exp( b ) == 0xFF ) && extractFloat32Frac( b ) )
@@ -1298,7 +1333,7 @@ flag float32_lt_quiet( float32 a, float32 b )
 | the same sign as `a' is returned.
 *----------------------------------------------------------------------------*/
 
-int32 float64_to_int32( float64 a )
+int32 float64_to_int32( float64 *a )
 {
     flag aSign;
     int16 aExp, shiftCount;
@@ -1370,7 +1405,7 @@ int32 float64_to_int32( float64 a )
 | overflows, the largest integer with the same sign as `a' is returned.
 *----------------------------------------------------------------------------*/
 
-int32 float64_to_int32_round_to_zero( float64 a )
+int32 float64_to_int32_round_to_zero( float64 *a )
 {
     flag aSign;
     int16 aExp, shiftCount;
@@ -1419,12 +1454,13 @@ int32 float64_to_int32_round_to_zero( float64 a )
 | performed according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float32 float64_to_float32( float64 a )
+float32 float64_to_float32( float64 *a )
 {
     flag aSign;
     int16 aExp;
     bits32 aSig0, aSig1, zSig;
     bits32 allZero;
+    commonNaNT cnan;
 
     aSig1 = extractFloat64Frac1( a );
     aSig0 = extractFloat64Frac0( a );
@@ -1432,7 +1468,8 @@ float32 float64_to_float32( float64 a )
     aSign = extractFloat64Sign( a );
     if ( aExp == 0x7FF ) {
         if ( aSig0 | aSig1 ) {
-            return commonNaNToFloat32( float64ToCommonNaN( a ) );
+            float64ToCommonNaN( &cnan, a );
+            return commonNaNToFloat32( &cnan );
         }
         return packFloat32( aSign, 0xFF, 0 );
     }
@@ -1449,7 +1486,7 @@ float32 float64_to_float32( float64 a )
 | Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_round_to_int( float64 a )
+void float64_round_to_int( float64 *dst, float64 *a )
 {
     flag aSign;
     int16 aExp;
@@ -1462,14 +1499,16 @@ float64 float64_round_to_int( float64 a )
         if ( 0x433 <= aExp ) {
             if (    ( aExp == 0x7FF )
                  && ( extractFloat64Frac0( a ) | extractFloat64Frac1( a ) ) ) {
-                return propagateFloat64NaN( a, a );
+                propagateFloat64NaN( dst, a, a );
+                return;
             }
-            return a;
+            *dst = *a;
+            return;
         }
         lastBitMask = 1;
         lastBitMask = ( lastBitMask<<( 0x432 - aExp ) )<<1;
         roundBitsMask = lastBitMask - 1;
-        z = a;
+        z = *a;
         roundingMode = float_rounding_mode;
         if ( roundingMode == float_round_nearest_even ) {
             if ( lastBitMask ) {
@@ -1484,7 +1523,7 @@ float64 float64_round_to_int( float64 a )
             }
         }
         else if ( roundingMode != float_round_to_zero ) {
-            if (   extractFloat64Sign( z )
+            if (   extractFloat64Sign( &z )
                  ^ ( roundingMode == float_round_up ) ) {
                 add64( z.high, z.low, 0, roundBitsMask, &z.high, &z.low );
             }
@@ -1493,7 +1532,10 @@ float64 float64_round_to_int( float64 a )
     }
     else {
         if ( aExp <= 0x3FE ) {
-            if ( ( ( (bits32) ( a.high<<1 ) ) | a.low ) == 0 ) return a;
+            if ( ( ( (bits32) ( a->high<<1 ) ) | a->low ) == 0 ) {
+                *dst = *a;
+                return;
+            }
             float_exception_flags |= float_flag_inexact;
             aSign = extractFloat64Sign( a );
             switch ( float_rounding_mode ) {
@@ -1501,45 +1543,57 @@ float64 float64_round_to_int( float64 a )
                 if (    ( aExp == 0x3FE )
                      && ( extractFloat64Frac0( a ) | extractFloat64Frac1( a ) )
                    ) {
-                    return packFloat64( aSign, 0x3FF, 0, 0 );
+                    packFloat64( dst, aSign, 0x3FF, 0, 0 );
+                    return;
                 }
                 break;
              case float_round_down:
-                return
-                      aSign ? packFloat64( 1, 0x3FF, 0, 0 )
-                    : packFloat64( 0, 0, 0, 0 );
+                {
+                    if (aSign) {
+                      packFloat64( dst, 1, 0x3FF, 0, 0 );
+                    } else {
+                        packFloat64( dst, 0, 0, 0, 0 );
+                    }
+                    return;
+                }
              case float_round_up:
-                return
-                      aSign ? packFloat64( 1, 0, 0, 0 )
-                    : packFloat64( 0, 0x3FF, 0, 0 );
+                {
+                    if (aSign) {
+                      packFloat64( dst, 1, 0, 0, 0 );
+                    } else {
+                        packFloat64( dst, 0, 0x3FF, 0, 0 );
+                    }
+                    return;
+                }
             }
-            return packFloat64( aSign, 0, 0, 0 );
+            packFloat64( dst, aSign, 0, 0, 0 );
+            return;
         }
         lastBitMask = 1;
         lastBitMask <<= 0x413 - aExp;
         roundBitsMask = lastBitMask - 1;
         z.low = 0;
-        z.high = a.high;
+        z.high = a->high;
         roundingMode = float_rounding_mode;
         if ( roundingMode == float_round_nearest_even ) {
             z.high += lastBitMask>>1;
-            if ( ( ( z.high & roundBitsMask ) | a.low ) == 0 ) {
+            if ( ( ( z.high & roundBitsMask ) | a->low ) == 0 ) {
                 z.high &= ~ lastBitMask;
             }
         }
         else if ( roundingMode != float_round_to_zero ) {
-            if (   extractFloat64Sign( z )
+            if (   extractFloat64Sign( &z )
                  ^ ( roundingMode == float_round_up ) ) {
-                z.high |= ( a.low != 0 );
+                z.high |= ( a->low != 0 );
                 z.high += roundBitsMask;
             }
         }
         z.high &= ~ roundBitsMask;
     }
-    if ( ( z.low != a.low ) || ( z.high != a.high ) ) {
+    if ( ( z.low != a->low ) || ( z.high != a->high ) ) {
         float_exception_flags |= float_flag_inexact;
     }
-    return z;
+    *dst = z;
 
 }
 
@@ -1551,7 +1605,7 @@ float64 float64_round_to_int( float64 a )
 | Arithmetic.
 *----------------------------------------------------------------------------*/
 
-static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
+static void addFloat64Sigs( float64 *dst, float64 *a, float64 *b, flag zSign )
 {
     int16 aExp, bExp, zExp;
     bits32 aSig0, aSig1, bSig0, bSig1, zSig0, zSig1, zSig2;
@@ -1566,8 +1620,12 @@ static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
     expDiff = aExp - bExp;
     if ( 0 < expDiff ) {
         if ( aExp == 0x7FF ) {
-            if ( aSig0 | aSig1 ) return propagateFloat64NaN( a, b );
-            return a;
+            if ( aSig0 | aSig1 ) {
+                propagateFloat64NaN( dst, a, b );
+                return;
+            }
+            *dst = *a;
+            return;
         }
         if ( bExp == 0 ) {
             --expDiff;
@@ -1581,8 +1639,12 @@ static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
     }
     else if ( expDiff < 0 ) {
         if ( bExp == 0x7FF ) {
-            if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
-            return packFloat64( zSign, 0x7FF, 0, 0 );
+            if ( bSig0 | bSig1 ) {
+                propagateFloat64NaN( dst, a, b );
+                return;
+            }
+            packFloat64( dst, zSign, 0x7FF, 0, 0 );
+            return;
         }
         if ( aExp == 0 ) {
             ++expDiff;
@@ -1597,12 +1659,17 @@ static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
     else {
         if ( aExp == 0x7FF ) {
             if ( aSig0 | aSig1 | bSig0 | bSig1 ) {
-                return propagateFloat64NaN( a, b );
+                propagateFloat64NaN( dst, a, b );
+                return;
             }
-            return a;
+            *dst = *a;
+            return;
         }
         add64( aSig0, aSig1, bSig0, bSig1, &zSig0, &zSig1 );
-        if ( aExp == 0 ) return packFloat64( zSign, 0, zSig0, zSig1 );
+        if ( aExp == 0 ) {
+            packFloat64( dst, zSign, 0, zSig0, zSig1 );
+            return;
+        }
         zSig2 = 0;
         zSig0 |= 0x00200000;
         zExp = aExp;
@@ -1616,7 +1683,8 @@ static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
  shiftRight1:
     shift64ExtraRightJamming( zSig0, zSig1, zSig2, 1, &zSig0, &zSig1, &zSig2 );
  roundAndPack:
-    return roundAndPackFloat64( zSign, zExp, zSig0, zSig1, zSig2 );
+    roundAndPackFloat64( dst, zSign, zExp, zSig0, zSig1, zSig2 );
+    return;
 
 }
 
@@ -1628,7 +1696,7 @@ static float64 addFloat64Sigs( float64 a, float64 b, flag zSign )
 | Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
+static void subFloat64Sigs( float64 *dst, float64 *a, float64 *b, flag zSign )
 {
     int16 aExp, bExp, zExp;
     bits32 aSig0, aSig1, bSig0, bSig1, zSig0, zSig1;
@@ -1648,12 +1716,14 @@ static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
     if ( expDiff < 0 ) goto bExpBigger;
     if ( aExp == 0x7FF ) {
         if ( aSig0 | aSig1 | bSig0 | bSig1 ) {
-            return propagateFloat64NaN( a, b );
+            propagateFloat64NaN( dst, a, b );
+            return;
         }
         float_raise( float_flag_invalid );
         z.low = float64_default_nan_low;
         z.high = float64_default_nan_high;
-        return z;
+        *dst = z;
+        return;
     }
     if ( aExp == 0 ) {
         aExp = 1;
@@ -1663,11 +1733,16 @@ static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
     if ( aSig0 < bSig0 ) goto bBigger;
     if ( bSig1 < aSig1 ) goto aBigger;
     if ( aSig1 < bSig1 ) goto bBigger;
-    return packFloat64( float_rounding_mode == float_round_down, 0, 0, 0 );
+    packFloat64( dst, float_rounding_mode == float_round_down, 0, 0, 0 );
+    return;
  bExpBigger:
     if ( bExp == 0x7FF ) {
-        if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
-        return packFloat64( zSign ^ 1, 0x7FF, 0, 0 );
+        if ( bSig0 | bSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
+        packFloat64( dst, zSign ^ 1, 0x7FF, 0, 0 );
+        return;
     }
     if ( aExp == 0 ) {
         ++expDiff;
@@ -1684,8 +1759,12 @@ static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
     goto normalizeRoundAndPack;
  aExpBigger:
     if ( aExp == 0x7FF ) {
-        if ( aSig0 | aSig1 ) return propagateFloat64NaN( a, b );
-        return a;
+        if ( aSig0 | aSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
+        *dst = *a;
+        return;
     }
     if ( bExp == 0 ) {
         --expDiff;
@@ -1700,7 +1779,8 @@ static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
     zExp = aExp;
  normalizeRoundAndPack:
     --zExp;
-    return normalizeRoundAndPackFloat64( zSign, zExp - 10, zSig0, zSig1 );
+    normalizeRoundAndPackFloat64( dst, zSign, zExp - 10, zSig0, zSig1 );
+    return;
 
 }
 
@@ -1710,17 +1790,19 @@ static float64 subFloat64Sigs( float64 a, float64 b, flag zSign )
 | Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_add( float64 a, float64 b )
+void float64_add( float64 *dst, float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
     aSign = extractFloat64Sign( a );
     bSign = extractFloat64Sign( b );
     if ( aSign == bSign ) {
-        return addFloat64Sigs( a, b, aSign );
+        addFloat64Sigs( dst, a, b, aSign );
+        return;
     }
     else {
-        return subFloat64Sigs( a, b, aSign );
+        subFloat64Sigs( dst, a, b, aSign );
+        return;
     }
 
 }
@@ -1731,17 +1813,19 @@ float64 float64_add( float64 a, float64 b )
 | Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_sub( float64 a, float64 b )
+void float64_sub( float64 *dst, float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
     aSign = extractFloat64Sign( a );
     bSign = extractFloat64Sign( b );
     if ( aSign == bSign ) {
-        return subFloat64Sigs( a, b, aSign );
+        subFloat64Sigs( dst, a, b, aSign );
+        return;
     }
     else {
-        return addFloat64Sigs( a, b, aSign );
+        addFloat64Sigs( dst, a, b, aSign );
+        return;
     }
 
 }
@@ -1752,7 +1836,7 @@ float64 float64_sub( float64 a, float64 b )
 | Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_mul( float64 a, float64 b )
+void float64_mul( float64 *dst, float64 *a, float64 *b )
 {
     flag aSign, bSign, zSign;
     int16 aExp, bExp, zExp;
@@ -1771,28 +1855,41 @@ float64 float64_mul( float64 a, float64 b )
     if ( aExp == 0x7FF ) {
         if (    ( aSig0 | aSig1 )
              || ( ( bExp == 0x7FF ) && ( bSig0 | bSig1 ) ) ) {
-            return propagateFloat64NaN( a, b );
+            propagateFloat64NaN( dst, a, b );
+            return;
         }
         if ( ( bExp | bSig0 | bSig1 ) == 0 ) goto invalid;
-        return packFloat64( zSign, 0x7FF, 0, 0 );
+        packFloat64( dst, zSign, 0x7FF, 0, 0 );
+        return;
     }
     if ( bExp == 0x7FF ) {
-        if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
+        if ( bSig0 | bSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
         if ( ( aExp | aSig0 | aSig1 ) == 0 ) {
  invalid:
             float_raise( float_flag_invalid );
             z.low = float64_default_nan_low;
             z.high = float64_default_nan_high;
-            return z;
+            *dst = z;
+            return;
         }
-        return packFloat64( zSign, 0x7FF, 0, 0 );
+        packFloat64( dst, zSign, 0x7FF, 0, 0 );
+        return;
     }
     if ( aExp == 0 ) {
-        if ( ( aSig0 | aSig1 ) == 0 ) return packFloat64( zSign, 0, 0, 0 );
+        if ( ( aSig0 | aSig1 ) == 0 ) {
+            packFloat64( dst, zSign, 0, 0, 0 );
+            return;
+        }
         normalizeFloat64Subnormal( aSig0, aSig1, &aExp, &aSig0, &aSig1 );
     }
     if ( bExp == 0 ) {
-        if ( ( bSig0 | bSig1 ) == 0 ) return packFloat64( zSign, 0, 0, 0 );
+        if ( ( bSig0 | bSig1 ) == 0 ) {
+            packFloat64( dst, zSign, 0, 0, 0 );
+            return;
+        }
         normalizeFloat64Subnormal( bSig0, bSig1, &bExp, &bSig0, &bSig1 );
     }
     zExp = aExp + bExp - 0x400;
@@ -1806,7 +1903,8 @@ float64 float64_mul( float64 a, float64 b )
             zSig0, zSig1, zSig2, 1, &zSig0, &zSig1, &zSig2 );
         ++zExp;
     }
-    return roundAndPackFloat64( zSign, zExp, zSig0, zSig1, zSig2 );
+    roundAndPackFloat64( dst, zSign, zExp, zSig0, zSig1, zSig2 );
+    return;
 
 }
 
@@ -1816,7 +1914,7 @@ float64 float64_mul( float64 a, float64 b )
 | IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_div( float64 a, float64 b )
+void float64_div( float64 *dst, float64 *a, float64 *b )
 {
     flag aSign, bSign, zSign;
     int16 aExp, bExp, zExp;
@@ -1834,16 +1932,27 @@ float64 float64_div( float64 a, float64 b )
     bSign = extractFloat64Sign( b );
     zSign = aSign ^ bSign;
     if ( aExp == 0x7FF ) {
-        if ( aSig0 | aSig1 ) return propagateFloat64NaN( a, b );
+        if ( aSig0 | aSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
         if ( bExp == 0x7FF ) {
-            if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
+            if ( bSig0 | bSig1 ) {
+                propagateFloat64NaN( dst, a, b );
+                return;
+            }
             goto invalid;
         }
-        return packFloat64( zSign, 0x7FF, 0, 0 );
+        packFloat64( dst, zSign, 0x7FF, 0, 0 );
+        return;
     }
     if ( bExp == 0x7FF ) {
-        if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
-        return packFloat64( zSign, 0, 0, 0 );
+        if ( bSig0 | bSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
+        packFloat64( dst, zSign, 0, 0, 0 );
+        return;
     }
     if ( bExp == 0 ) {
         if ( ( bSig0 | bSig1 ) == 0 ) {
@@ -1852,15 +1961,20 @@ float64 float64_div( float64 a, float64 b )
                 float_raise( float_flag_invalid );
                 z.low = float64_default_nan_low;
                 z.high = float64_default_nan_high;
-                return z;
+                *dst = z;
+                return;
             }
             float_raise( float_flag_divbyzero );
-            return packFloat64( zSign, 0x7FF, 0, 0 );
+            packFloat64( dst, zSign, 0x7FF, 0, 0 );
+            return;
         }
         normalizeFloat64Subnormal( bSig0, bSig1, &bExp, &bSig0, &bSig1 );
     }
     if ( aExp == 0 ) {
-        if ( ( aSig0 | aSig1 ) == 0 ) return packFloat64( zSign, 0, 0, 0 );
+        if ( ( aSig0 | aSig1 ) == 0 ) {
+            packFloat64( dst, zSign, 0, 0, 0 );
+            return;
+        }
         normalizeFloat64Subnormal( aSig0, aSig1, &aExp, &aSig0, &aSig1 );
     }
     zExp = aExp - bExp + 0x3FD;
@@ -1888,7 +2002,8 @@ float64 float64_div( float64 a, float64 b )
         zSig1 |= ( ( rem1 | rem2 | rem3 ) != 0 );
     }
     shift64ExtraRightJamming( zSig0, zSig1, 0, 11, &zSig0, &zSig1, &zSig2 );
-    return roundAndPackFloat64( zSign, zExp, zSig0, zSig1, zSig2 );
+    roundAndPackFloat64( dst, zSign, zExp, zSig0, zSig1, zSig2 );
+    return;
 
 }
 
@@ -1898,7 +2013,7 @@ float64 float64_div( float64 a, float64 b )
 | according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_rem( float64 a, float64 b )
+void float64_rem( float64 *dst, float64 *a, float64 *b )
 {
     flag aSign, bSign, zSign;
     int16 aExp, bExp, expDiff;
@@ -1918,13 +2033,18 @@ float64 float64_rem( float64 a, float64 b )
     if ( aExp == 0x7FF ) {
         if (    ( aSig0 | aSig1 )
              || ( ( bExp == 0x7FF ) && ( bSig0 | bSig1 ) ) ) {
-            return propagateFloat64NaN( a, b );
+            propagateFloat64NaN( dst, a, b );
+            return;
         }
         goto invalid;
     }
     if ( bExp == 0x7FF ) {
-        if ( bSig0 | bSig1 ) return propagateFloat64NaN( a, b );
-        return a;
+        if ( bSig0 | bSig1 ) {
+            propagateFloat64NaN( dst, a, b );
+            return;
+        }
+        *dst = *a;
+        return;
     }
     if ( bExp == 0 ) {
         if ( ( bSig0 | bSig1 ) == 0 ) {
@@ -1932,16 +2052,23 @@ float64 float64_rem( float64 a, float64 b )
             float_raise( float_flag_invalid );
             z.low = float64_default_nan_low;
             z.high = float64_default_nan_high;
-            return z;
+            *dst = z;
+            return;
         }
         normalizeFloat64Subnormal( bSig0, bSig1, &bExp, &bSig0, &bSig1 );
     }
     if ( aExp == 0 ) {
-        if ( ( aSig0 | aSig1 ) == 0 ) return a;
+        if ( ( aSig0 | aSig1 ) == 0 ) {
+            *dst = *a;
+            return;
+        }
         normalizeFloat64Subnormal( aSig0, aSig1, &aExp, &aSig0, &aSig1 );
     }
     expDiff = aExp - bExp;
-    if ( expDiff < -1 ) return a;
+    if ( expDiff < -1 ) {
+        *dst = *a;
+        return;
+    }
     shortShift64Left(
         aSig0 | 0x00100000, aSig1, 11 - ( expDiff < 0 ), &aSig0, &aSig1 );
     shortShift64Left( bSig0 | 0x00100000, bSig1, 11, &bSig0, &bSig1 );
@@ -1982,8 +2109,11 @@ float64 float64_rem( float64 a, float64 b )
         ++q;
         sub64( aSig0, aSig1, bSig0, bSig1, &aSig0, &aSig1 );
     } while ( 0 <= (sbits32) aSig0 );
+
+    /* Casting to unsigned pointer here. Will this work? */
     add64(
-        aSig0, aSig1, alternateASig0, alternateASig1, &sigMean0, &sigMean1 );
+        aSig0, aSig1, alternateASig0, alternateASig1, (bits32 *) &sigMean0, &sigMean1 );
+
     if (    ( sigMean0 < 0 )
          || ( ( ( sigMean0 | sigMean1 ) == 0 ) && ( q & 1 ) ) ) {
         aSig0 = alternateASig0;
@@ -1991,8 +2121,8 @@ float64 float64_rem( float64 a, float64 b )
     }
     zSign = ( (sbits32) aSig0 < 0 );
     if ( zSign ) sub64( 0, 0, aSig0, aSig1, &aSig0, &aSig1 );
-    return
-        normalizeRoundAndPackFloat64( aSign ^ zSign, bExp - 4, aSig0, aSig1 );
+    normalizeRoundAndPackFloat64( dst, aSign ^ zSign, bExp - 4, aSig0, aSig1 );
+    return;
 
 }
 
@@ -2002,7 +2132,7 @@ float64 float64_rem( float64 a, float64 b )
 | Arithmetic.
 *----------------------------------------------------------------------------*/
 
-float64 float64_sqrt( float64 a )
+void float64_sqrt( float64 *dst, float64 *a )
 {
     flag aSign;
     int16 aExp, zExp;
@@ -2015,20 +2145,33 @@ float64 float64_sqrt( float64 a )
     aExp = extractFloat64Exp( a );
     aSign = extractFloat64Sign( a );
     if ( aExp == 0x7FF ) {
-        if ( aSig0 | aSig1 ) return propagateFloat64NaN( a, a );
-        if ( ! aSign ) return a;
+        if ( aSig0 | aSig1 ) {
+            propagateFloat64NaN( dst, a, a );
+            return;
+        }
+        if ( ! aSign ) {
+            *dst = *a;
+            return;
+        }
         goto invalid;
     }
     if ( aSign ) {
-        if ( ( aExp | aSig0 | aSig1 ) == 0 ) return a;
+        if ( ( aExp | aSig0 | aSig1 ) == 0 ) {
+            *dst = *a;
+            return;
+        }
  invalid:
         float_raise( float_flag_invalid );
         z.low = float64_default_nan_low;
         z.high = float64_default_nan_high;
-        return z;
+        *dst = z;
+        return;
     }
     if ( aExp == 0 ) {
-        if ( ( aSig0 | aSig1 ) == 0 ) return packFloat64( 0, 0, 0, 0 );
+        if ( ( aSig0 | aSig1 ) == 0 ) {
+            packFloat64( dst, 0, 0, 0, 0 );
+            return;
+        }
         normalizeFloat64Subnormal( aSig0, aSig1, &aExp, &aSig0, &aSig1 );
     }
     zExp = ( ( aExp - 0x3FF )>>1 ) + 0x3FE;
@@ -2062,7 +2205,8 @@ float64 float64_sqrt( float64 a )
         zSig1 |= ( ( rem1 | rem2 | rem3 ) != 0 );
     }
     shift64ExtraRightJamming( zSig0, zSig1, 0, 10, &zSig0, &zSig1, &zSig2 );
-    return roundAndPackFloat64( 0, zExp, zSig0, zSig1, zSig2 );
+    roundAndPackFloat64( dst, 0, zExp, zSig0, zSig1, zSig2 );
+    return;
 
 }
 
@@ -2072,7 +2216,7 @@ float64 float64_sqrt( float64 a )
 | according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_eq( float64 a, float64 b )
+flag float64_eq( float64 *a, float64 *b )
 {
 
     if (    (    ( extractFloat64Exp( a ) == 0x7FF )
@@ -2086,10 +2230,10 @@ flag float64_eq( float64 a, float64 b )
         return 0;
     }
     return
-           ( a.low == b.low )
-        && (    ( a.high == b.high )
-             || (    ( a.low == 0 )
-                  && ( (bits32) ( ( a.high | b.high )<<1 ) == 0 ) )
+           ( a->low == b->low )
+        && (    ( a->high == b->high )
+             || (    ( a->low == 0 )
+                  && ( (bits32) ( ( a->high | b->high )<<1 ) == 0 ) )
            );
 
 }
@@ -2100,7 +2244,7 @@ flag float64_eq( float64 a, float64 b )
 | performed according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_le( float64 a, float64 b )
+flag float64_le( float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
@@ -2117,12 +2261,12 @@ flag float64_le( float64 a, float64 b )
     if ( aSign != bSign ) {
         return
                aSign
-            || (    ( ( (bits32) ( ( a.high | b.high )<<1 ) ) | a.low | b.low )
+            || (    ( ( (bits32) ( ( a->high | b->high )<<1 ) ) | a->low | b->low )
                  == 0 );
     }
     return
-          aSign ? le64( b.high, b.low, a.high, a.low )
-        : le64( a.high, a.low, b.high, b.low );
+          aSign ? le64( b->high, b->low, a->high, a->low )
+        : le64( a->high, a->low, b->high, b->low );
 
 }
 
@@ -2132,7 +2276,7 @@ flag float64_le( float64 a, float64 b )
 | according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_lt( float64 a, float64 b )
+flag float64_lt( float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
@@ -2149,12 +2293,12 @@ flag float64_lt( float64 a, float64 b )
     if ( aSign != bSign ) {
         return
                aSign
-            && (    ( ( (bits32) ( ( a.high | b.high )<<1 ) ) | a.low | b.low )
+            && (    ( ( (bits32) ( ( a->high | b->high )<<1 ) ) | a->low | b->low )
                  != 0 );
     }
     return
-          aSign ? lt64( b.high, b.low, a.high, a.low )
-        : lt64( a.high, a.low, b.high, b.low );
+          aSign ? lt64( b->high, b->low, a->high, a->low )
+        : lt64( a->high, a->low, b->high, b->low );
 
 }
 
@@ -2165,7 +2309,7 @@ flag float64_lt( float64 a, float64 b )
 | according to the IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_eq_signaling( float64 a, float64 b )
+flag float64_eq_signaling( float64 *a, float64 *b )
 {
 
     if (    (    ( extractFloat64Exp( a ) == 0x7FF )
@@ -2177,10 +2321,10 @@ flag float64_eq_signaling( float64 a, float64 b )
         return 0;
     }
     return
-           ( a.low == b.low )
-        && (    ( a.high == b.high )
-             || (    ( a.low == 0 )
-                  && ( (bits32) ( ( a.high | b.high )<<1 ) == 0 ) )
+           ( a->low == b->low )
+        && (    ( a->high == b->high )
+             || (    ( a->low == 0 )
+                  && ( (bits32) ( ( a->high | b->high )<<1 ) == 0 ) )
            );
 
 }
@@ -2192,7 +2336,7 @@ flag float64_eq_signaling( float64 a, float64 b )
 | IEEE Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_le_quiet( float64 a, float64 b )
+flag float64_le_quiet( float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
@@ -2211,12 +2355,12 @@ flag float64_le_quiet( float64 a, float64 b )
     if ( aSign != bSign ) {
         return
                aSign
-            || (    ( ( (bits32) ( ( a.high | b.high )<<1 ) ) | a.low | b.low )
+            || (    ( ( (bits32) ( ( a->high | b->high )<<1 ) ) | a->low | b->low )
                  == 0 );
     }
     return
-          aSign ? le64( b.high, b.low, a.high, a.low )
-        : le64( a.high, a.low, b.high, b.low );
+          aSign ? le64( b->high, b->low, a->high, a->low )
+        : le64( a->high, a->low, b->high, b->low );
 
 }
 
@@ -2227,7 +2371,7 @@ flag float64_le_quiet( float64 a, float64 b )
 | Standard for Floating-Point Arithmetic.
 *----------------------------------------------------------------------------*/
 
-flag float64_lt_quiet( float64 a, float64 b )
+flag float64_lt_quiet( float64 *a, float64 *b )
 {
     flag aSign, bSign;
 
@@ -2246,12 +2390,12 @@ flag float64_lt_quiet( float64 a, float64 b )
     if ( aSign != bSign ) {
         return
                aSign
-            && (    ( ( (bits32) ( ( a.high | b.high )<<1 ) ) | a.low | b.low )
+            && (    ( ( (bits32) ( ( a->high | b->high )<<1 ) ) | a->low | b->low )
                  != 0 );
     }
     return
-          aSign ? lt64( b.high, b.low, a.high, a.low )
-        : lt64( a.high, a.low, b.high, b.low );
+          aSign ? lt64( b->high, b->low, a->high, a->low )
+        : lt64( a->high, a->low, b->high, b->low );
 
 }
 
